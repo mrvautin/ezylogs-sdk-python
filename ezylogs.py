@@ -1,8 +1,22 @@
-import httplib, json, psutil, datetime
+#!/usr/bin/ python
+
+import os, requests, json, psutil, platform, time, threading
 server = "https://ezylogs.com"
+minMonitoringInterval = 300000
 
 class configurationClass:
     setup = True
+
+class ThreadJob(threading.Thread):
+    def __init__(self,callback,event,interval):
+        self.callback = callback
+        self.event = event
+        self.interval = interval
+        super(ThreadJob,self).__init__()
+
+    def run(self):
+        while not self.event.wait(self.interval):
+            self.callback()
 
 config = configurationClass()
 
@@ -28,48 +42,54 @@ def setup(obj):
     config.system = obj.get("system")
 
     # Check the API key etc is correct
-    apiKeyCheck = request("/account/auth", {"apiKey": obj.get("apiKey")})
+    apiKeyCheck = request("/account/auth", {'apiKey': obj.get("apiKey")})
 
     # Check response
-    if apiKeyCheck.status != 200:
+    if apiKeyCheck.status_code != 200:
         config.setup = False
         return
 
+def monitor(interval=30000):
+    if interval < minMonitoringInterval:
+        print('ERROR with interval. Needs to be {} or greater'.format(minMonitoringInterval))
+        return
+
+    event = threading.Event()
+    k = ThreadJob(sendUpMonitoring, event, interval / 1000)
+    k.start()
+
 def sendUpMonitoring():
     if config.setup == True:
-        # content = {
-        #     "pid": monitorData.pid,
-        #     "cpu": monitorData.cpu,
-        #     "load": os.loadavg()[0],
-        #     "platform": os.platform(),
-        #     "processMemory": process.memoryUsage().rss,
-        #     "processUptime": monitorData.elapsed,
-        #     "totalMemory": os.totalmem(),
-        #     "freeMemory": os.freemem(),
-        #     "serverUptime": os.uptime() * 1000
-        # }
-        print(psutil.virtual_memory())
+        # Get the process details
+        process = psutil.Process(os.getpid())
 
-        request("/monitoring", {
+        content = {
+            "pid": os.getpid(),
+            "cpu": psutil.cpu_percent(),
+            "load": os.getloadavg()[0],
+            "platform": platform.system(),
+            "processMemory": process.memory_info().rss,
+            "processUptime": time.time() - process.create_time(),
+            "totalMemory": psutil.virtual_memory().available,
+            "freeMemory": psutil.virtual_memory().free,
+            "serverUptime": time.time() - psutil.boot_time()
+        }
+
+        # Send up monitoring data
+        request("/monitor", {
             "apiKey": config.apiKey, 
             "system": config.system,
-            "data": {}, 
-            "timestamp": datetime.datetime.utcnow().isoformat()
+            "data": content
         })
 
 def sendLog(data, level):
-    print('data', data)
     if config.setup == True:
-        if type(data) is dict:
-            print('in here')
-            data = json.dumps(data)
 
-        test = request("/log", {
+        request("/log", {
             "apiKey": config.apiKey, 
             "system": config.system,
             "data": data, 
-            "level": level,
-            "timestamp": datetime.datetime.utcnow().isoformat()
+            "level": level
         })
 
 def debug(*argv):
@@ -88,12 +108,5 @@ def warn(*argv):
     sendLog(argv, "warn")
 
 def request(path, data):
-    params = json.dumps(data)
-    print("params", params)
-    headers = { 
-        "Content-type": "application/json",
-        "Accept": "application/json"
-    }
-    conn = httplib.HTTPConnection("gatehouseg1.stgeorge.com.au", "8080")
-    conn.request("POST", server + path, headers=headers, body=params)
-    return conn.getresponse()
+    req = requests.post(server + path, json=data)
+    return req
