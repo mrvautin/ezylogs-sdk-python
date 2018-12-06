@@ -2,8 +2,9 @@ import ezylogs
 
 ezylogs.setup({
     "apiKey": "my-api-key",
-    "system": "another-system"
+    "system": "my-system-name"
 })
 
-ezylogs.debug({"test": "test1 arg1dsdsd"})
+ezylogs.debug({"Variable": "My variable value"})
+ezylogs.error({"Error": "System crashed"})
 ezylogs.monitor()
